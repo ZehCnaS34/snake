@@ -1,9 +1,13 @@
 (ns snake.core
-    (:require))
+    (:require [clojure.data :as data]))
 
 (defn floor [n] (.floor js/Math n))
 
-(def TILE 10)
+(defn prob [percent]
+  (> percent (.random js/Math)))
+    
+
+(def TILE 20)
 (def VIEW-WIDTH (.-innerWidth js/window))
 (def VIEW-HEIGHT (.-innerHeight js/window))
 (def COLUMNS (floor (/ VIEW-WIDTH TILE)))
@@ -118,28 +122,39 @@
   (fn [& xs]
     (apply f (reverse xs))))
 
-(defn updater [e]
+(defn clean-tree [current-ids]
+  (let [[rm _ _] (data/diff 
+                   (into #{} (keys @elements))
+                   current-ids)
+        nodes (select-keys @elements rm)]
+    (doseq [node (vals nodes)]
+      (.remove node))
+    (swap! elements select-keys current-ids)))
 
+
+(defn updater [e]
   (let [ate (ate? (:snake @app-state) (:apples @app-state))]
     (if (not (empty? ate))
       (do
-        (swap! app-state update-in [:apples]
-               (flip filter) 
-               #(not= (:location %) (first ate))) 
+        (swap! app-state update-in [:apples] (flip filter) #(not= (:location %) (first ate))) 
         (swap! app-state update-in [:snake] move true)) 
-
       (swap! app-state update-in [:snake] move false))) 
-    
-        
-
   (swap! app-state assoc-in [:game :lost] (overlap? (:snake @app-state)))
-
   (if (get-in @app-state [:game :lost])
     (swap! app-state assoc-in [:snake] (create-snake)))
 
+  (if (prob .05)
+    (swap! app-state update-in [:apples] conj (create-apple)))
+
+  (clean-tree
+    (into #{}
+      (concat
+        (map #(:id %) (:apples @app-state))
+        (get-in @app-state [:snake :ids]))))
+
   (draw @app-state))
 
-(.addEventListener (.getElementById js/document "step") "click" updater)
+; (.addEventListener (.getElementById js/document "step") "click" updater)
     
 (defonce game-loop 
   (js/setInterval
