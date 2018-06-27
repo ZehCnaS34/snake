@@ -1,5 +1,9 @@
 (ns snake.core
-    (:require [clojure.data :as data]))
+    (:require [clojure.data :as data]
+              [snake.style :as s]
+              [snake.node :as n]
+              [snake.util :as u]))
+
 
 (defn floor [n] (.floor js/Math n))
 
@@ -15,12 +19,6 @@
 
 (enable-console-print!)
 
-(defonce ID (atom 0))
-(defn id []
-  (let [id @ID]
-    (swap! ID inc)
-    id))
-
 (def app (.getElementById js/document "app"))
 
 (defn ri [ciel]
@@ -28,7 +26,7 @@
 
 (defn create-snake 
   ([body direction] {:body body 
-                     :ids [(id) (id) (id) (id) (id)]
+                     :ids [(n/get-id) (n/get-id) (n/get-id) (n/get-id) (n/get-id)]
                      :type :snake
                      :direction direction})
   ([] (create-snake '((0 1) (0 2) (0 3) (0 4) (0 5)) [1 0]))) 
@@ -36,7 +34,7 @@
 (defn create-apple 
   ([] (create-apple [(ri COLUMNS) (ri ROWS)]))
   ([loc] {:location loc
-          :id (id)
+          :id (n/get-id)
           :type :apple}))
 
 (defn ate? [{[head & _] :body} apples] 
@@ -44,6 +42,12 @@
 
 (defn overlap? [{[head & tail] :body}]
   (contains? (into #{} tail) head))
+
+(defn wrap [floor x ciel]
+  (cond
+    (< x floor) ciel
+    (>= x ciel) floor
+    :else x))
 
 (defn move [{:keys [body direction ids] :as snake} grow]
   (let [nx (+ (direction 0) (-> body first (nth 0)))
@@ -54,16 +58,10 @@
         (conj
           (if grow body (butlast body))
           (list 
-            (cond
-              (< nx 0) COLUMNS
-              (>= nx COLUMNS) 0
-              :else nx)
-            (cond
-              (< ny 0) ROWS
-              (>= ny ROWS) 0
-              :else ny))))
+            (wrap 0 nx COLUMNS)
+            (wrap 0 ny ROWS))))
       grow
-      (update-in [:ids] conj (id)))))
+      (update-in [:ids] conj (n/get-id)))))
         
 (defn low-on-apples? [apples]
   (< (count apples) 10))
@@ -77,64 +75,33 @@
                           :apples (map #(create-apple) (range 10))
                           :type :state}))
 
-(defonce elements (atom {}))
-
-(defn elt-pool [id]
-  (let [elts @elements
-        element (elts id)]
-    (if (nil? element)
-      (let [e (.createElement js/document "div")]
-        (set! (.-id e) (str "element-" id))
-        (set! (.-position (.-style e)) "absolute")
-        (set! (.-height (.-style e)) (str TILE "px"))
-        (set! (.-width (.-style e)) (str TILE "px"))
-        (.appendChild app e) 
-        (swap! elements assoc id e)
-        (elt-pool id))
-      element)))
 
 (defmulti draw (fn [item] (:type item)))
 
 (defmethod draw :state
-  [{:keys [snake apples]}]
+  [{snake :snake apples :apples}]
   (draw snake)
   (doseq [apple apples]
     (draw apple)))
 
 (defmethod draw :apple
-  [{[x y] :location
-    id :id}]
-  (let [elt (elt-pool id)
-        style (.-style elt)]
-    (set! (.-backgroundColor style) "red")
-    (set! (.-zIndex style) 1)
-    (set! (.-top style) (str (* y TILE) "px"))
-    (set! (.-left style) (str (* x TILE) "px"))))
+  [{[x y] :location id :id}]
+  (doto (-> id n/get-node s/get-style)
+    (s/background-color "red")
+    (s/z-index 1)
+    (s/top (str (* y TILE) "px"))
+    (s/left (str (* x TILE) "px"))))
 
 (defmethod draw :snake
-  [{body :body
-    ids :ids}]
-  (doseq [[[x y] id] (map vector body ids)]
-    (let [elt (elt-pool id)
-          style (.-style elt)]
-      (set! (.-backgroundColor style) "blue")
-      (set! (.-zIndex style) 100)
-      (set! (.-boxShadow style) "inset 0 0 1px white")
-      (set! (.-top style) (str (* y TILE) "px"))
-      (set! (.-left style) (str (* x TILE) "px")))))
-
-(defn flip [f]
-  (fn [& xs]
-    (apply f (reverse xs))))
-
-(defn clean-tree [current-ids]
-  (let [[rm _ _] (data/diff 
-                   (into #{} (keys @elements))
-                   current-ids)
-        nodes (select-keys @elements rm)]
-    (doseq [node (vals nodes)]
-      (.remove node))
-    (swap! elements select-keys current-ids)))
+  [{body :body ids :ids}]
+  (doseq [[[x y] id] (map vector body ids)
+          :let [elt (n/get-node id)]]
+    (doto (.-style elt)
+      (s/background-color "blue")
+      (s/z-index 100)
+      (s/box-shadow "inset 0 0 1px white")
+      (s/top (str (* y TILE) "px"))
+      (s/left (str (* x TILE) "px")))))
 
 
 (defn updater [e]
@@ -144,7 +111,7 @@
         lost (overlap? snake)]
 
     (if-not (empty? ate)
-      (do (swap! app-state update-in [:apples] (flip filter) #(not= (:location %) (first ate))) 
+      (do (swap! app-state update-in [:apples] (u/flip filter) #(not= (:location %) (first ate))) 
           (swap! app-state update-in [:snake] move true)) 
       (swap! app-state update-in [:snake] move false)) 
 
@@ -155,7 +122,7 @@
     (when (low-on-apples? apples)
       (swap! app-state update-in [:apples] conj (create-apple)))
 
-    (clean-tree
+    (n/clean-tree
       (into #{}
         (concat
           (map #(:id %) (:apples @app-state))
