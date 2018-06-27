@@ -7,7 +7,7 @@
   (> percent (.random js/Math)))
     
 
-(def TILE 20)
+(def TILE 40)
 (def VIEW-WIDTH (.-innerWidth js/window))
 (def VIEW-HEIGHT (.-innerHeight js/window))
 (def COLUMNS (floor (/ VIEW-WIDTH TILE)))
@@ -28,10 +28,10 @@
 
 (defn create-snake 
   ([body direction] {:body body 
-                     :ids [(id) (id)]
+                     :ids [(id) (id) (id) (id) (id)]
                      :type :snake
                      :direction direction})
-  ([] (create-snake '((0 1) (0 2)) [1 0]))) 
+  ([] (create-snake '((0 1) (0 2) (0 3) (0 4) (0 5)) [1 0]))) 
 
 (defn create-apple 
   ([] (create-apple [(ri COLUMNS) (ri ROWS)]))
@@ -65,6 +65,11 @@
       grow
       (update-in [:ids] conj (id)))))
         
+(defn low-on-apples? [apples]
+  (< (count apples) 10))
+
+(defn lost? [v]
+  v)
 
 ;; define your app data so that it doesn't get over-written on reload
 
@@ -133,26 +138,30 @@
 
 
 (defn updater [e]
-  (let [ate (ate? (:snake @app-state) (:apples @app-state))]
-    (if (not (empty? ate))
-      (do
-        (swap! app-state update-in [:apples] (flip filter) #(not= (:location %) (first ate))) 
-        (swap! app-state update-in [:snake] move true)) 
-      (swap! app-state update-in [:snake] move false))) 
-  (swap! app-state assoc-in [:game :lost] (overlap? (:snake @app-state)))
-  (if (get-in @app-state [:game :lost])
-    (swap! app-state assoc-in [:snake] (create-snake)))
+  (let [snake (get-in @app-state [:snake])
+        apples (get-in @app-state [:apples])
+        ate (ate? snake apples)
+        lost (overlap? snake)]
 
-  (if (prob .05)
-    (swap! app-state update-in [:apples] conj (create-apple)))
+    (if-not (empty? ate)
+      (do (swap! app-state update-in [:apples] (flip filter) #(not= (:location %) (first ate))) 
+          (swap! app-state update-in [:snake] move true)) 
+      (swap! app-state update-in [:snake] move false)) 
 
-  (clean-tree
-    (into #{}
-      (concat
-        (map #(:id %) (:apples @app-state))
-        (get-in @app-state [:snake :ids]))))
+    (when lost
+      (swap! app-state assoc-in [:game :lost] lost)
+      (swap! app-state assoc-in [:snake] (create-snake)))
 
-  (draw @app-state))
+    (when (low-on-apples? apples)
+      (swap! app-state update-in [:apples] conj (create-apple)))
+
+    (clean-tree
+      (into #{}
+        (concat
+          (map #(:id %) (:apples @app-state))
+          (get-in @app-state [:snake :ids]))))
+
+    (draw @app-state)))
 
 ; (.addEventListener (.getElementById js/document "step") "click" updater)
     
@@ -170,18 +179,22 @@
       (= key :right) [1 0]
       :else (get-in @app-state [:snake :direction]))))
   
+(def keymap
+  {38 :up
+   87 :up
+   40 :down
+   83 :down
+   37 :left
+   65 :left
+   39 :right
+   68 :right})
 
 (defonce key-handler
   (.addEventListener (.-body js/document) "keydown" 
     (fn [e]
       (let [code (.-keyCode e)]
         (keypress
-          (cond
-            (or (= code 38) (= code 87)) :up
-            (or (= code 40) (= code 83)) :down
-            (or (= code 37) (= code 65)) :left
-            (or (= code 39) (= code 68)) :right
-            :default (println (str "code=" code))))))))
+          (keymap code))))))
 
                                    
                    
